@@ -6,9 +6,14 @@ const cors = require("cors");
 const morgan = require("morgan");
 const dotenv = require("dotenv");
 
+// Database connection
+const connectDB = require("./config/db.js");
+
+
 // Import routes
 const userRoutes = require("./routes/userRoutes");
 const messageRoutes = require("./routes/messageRoutes");
+const chatRoutes = require("./routes/chatRoutes");
 
 // Load environment variables
 dotenv.config();
@@ -18,26 +23,21 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
-    origin: process.env.CLIENT_URL || "http://localhost:3000",
-    methods: ["GET", "POST"],
+    origin: ["http://localhost:5173", "http://localhost:3000"],
     credentials: true,
   },
 });
+connectDB();
 
 // Middleware
 app.use(cors());
 app.use(express.json());
 app.use(morgan("dev"));
 
-// Database connection
-mongoose
-  .connect(process.env.MONGODB_URI || "mongodb://localhost:27017/chat-app")
-  .then(() => console.log("Connected to MongoDB"))
-  .catch((err) => console.error("MongoDB connection error:", err));
-
 // Routes
-app.use("/api/users", userRoutes);
-app.use("/api/messages", messageRoutes);
+app.use("/api/user", userRoutes);
+app.use("/api/chat", chatRoutes);
+app.use("/api/message", messageRoutes);
 
 // Socket.IO connection handling
 const connectedUsers = new Map();
@@ -66,7 +66,7 @@ io.on("connection", (socket) => {
 
     // Save message to database
     try {
-      const Message = require("./models/Message");
+      const Message = require("./models/messageModel.js");
       const newMessage = new Message({
         sender: senderId,
         receiver: receiverId,

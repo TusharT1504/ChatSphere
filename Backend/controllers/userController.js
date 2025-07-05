@@ -1,135 +1,87 @@
-const User = require('../models/User');
-const jwt = require('jsonwebtoken');
+const asyncHandler = require("express-async-handler");
+const User = require("../models/userModel");
+const generateToken = require("../config/generateToken");
 
-// Generate JWT token
-const generateToken = (userId) => {
-  return jwt.sign({ userId }, process.env.JWT_SECRET, { expiresIn: '7d' });
-};
+//@description     Get or Search all users
+//@route           GET /api/user?search=
+//@access          Public
+const allUsers = asyncHandler(async (req, res) => {
+  const keyword = req.query.search
+    ? {
+        $or: [
+          { name: { $regex: req.query.search, $options: "i" } },
+          { username: { $regex: req.query.search, $options: "i" } },
+          { email: { $regex: req.query.search, $options: "i" } },
+        ],
+      }
+    : {};
 
-// Register new user
-exports.register = async (req, res) => {
-  try {
-    const { username, email, password } = req.body;
+  const users = await User.find(keyword).find({ _id: { $ne: req.user._id } });
+  res.send(users);
+});
 
-    // Check if user already exists
-    const existingUser = await User.findOne({ 
-      $or: [{ email }, { username }] 
-    });
+//@description     Register new user
+//@route           POST /api/user/
+//@access          Public
+const registerUser = asyncHandler(async (req, res) => {
+  const { name, email, password, pic } = req.body;
 
-    if (existingUser) {
-      return res.status(400).json({ 
-        message: 'User with this email or username already exists' 
-      });
-    }
+  if (!name || !email || !password) {
+    res.status(400);
+    throw new Error("Please Enter all the Feilds");
+  }
 
-    // Create new user
-    const user = new User({
-      username,
-      email,
-      password
-    });
+  const userExists = await User.findOne({ email });
 
-    await user.save();
+  if (userExists) {
+    res.status(400);
+    throw new Error("User already exists");
+  }
 
-    // Generate token
-    const token = generateToken(user._id);
+  const user = await User.create({
+    name,
+    username: name, // Add username field with the same value as name
+    email,
+    password,
+    pic,
+  });
 
+  if (user) {
     res.status(201).json({
-      user: {
-        id: user._id,
-        username: user.username,
-        email: user.email,
-        avatar: user.avatar
-      },
-      token
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      isAdmin: user.isAdmin,
+      pic: user.pic,
+      token: generateToken(user._id),
     });
-  } catch (error) {
-    res.status(500).json({ message: 'Error creating user', error: error.message });
+  } else {
+    res.status(400);
+    throw new Error("User not found");
   }
-};
+});
 
-// Login user
-exports.login = async (req, res) => {
-  try {
-    const { email, password } = req.body;
+//@description     Auth the user
+//@route           POST /api/users/login
+//@access          Public
+const authUser = asyncHandler(async (req, res) => {
+  const { email, password } = req.body;
 
-    // Find user
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(401).json({ message: 'Invalid credentials' });
-    }
+  const user = await User.findOne({ email });
 
-    // Check password
-    const isMatch = await user.comparePassword(password);
-    if (!isMatch) {
-      return res.status(401).json({ message: 'Invalid credentials' });
-    }
-
-    // Update user status
-    user.status = 'online';
-    user.lastSeen = new Date();
-    await user.save();
-
-    // Generate token
-    const token = generateToken(user._id);
-
+  if (user && (await user.matchPassword(password))) {
     res.json({
-      user: {
-        id: user._id,
-        username: user.username,
-        email: user.email,
-        avatar: user.avatar,
-        status: user.status
-      },
-      token
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      isAdmin: user.isAdmin,
+      pic: user.pic,
+      token: generateToken(user._id),
     });
-  } catch (error) {
-    res.status(500).json({ message: 'Error logging in', error: error.message });
+  } else {
+    res.status(401);
+    throw new Error("Invalid Email or Password");
   }
-};
+});
 
-// Get user profile
-exports.getProfile = async (req, res) => {
-  try {
-    const user = await User.findById(req.user._id).select('-password');
-    res.json(user);
-  } catch (error) {
-    res.status(500).json({ message: 'Error fetching profile', error: error.message });
-  }
-};
-
-// Search users
-exports.searchUsers = async (req, res) => {
-  try {
-    const { query } = req.query;
-    const searchRegex = new RegExp(query, 'i');
-
-    const users = await User.find({
-      $or: [
-        { username: searchRegex },
-        { email: searchRegex }
-      ],
-      _id: { $ne: req.user._id } // Exclude current user
-    }).select('username email avatar status lastSeen');
-
-    res.json(users);
-  } catch (error) {
-    res.status(500).json({ message: 'Error searching users', error: error.message });
-  }
-};
-
-// Update user status
-exports.updateStatus = async (req, res) => {
-  try {
-    const { status } = req.body;
-    const user = await User.findById(req.user._id);
-    
-    user.status = status;
-    user.lastSeen = new Date();
-    await user.save();
-
-    res.json({ status: user.status, lastSeen: user.lastSeen });
-  } catch (error) {
-    res.status(500).json({ message: 'Error updating status', error: error.message });
-  }
-}; 
+module.exports = { allUsers, registerUser, authUser };
